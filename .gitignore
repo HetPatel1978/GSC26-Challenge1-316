@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+data/
+*.egg-info/
+.claude/
+.venv/
+venv/
+.ray/
+ray_results/

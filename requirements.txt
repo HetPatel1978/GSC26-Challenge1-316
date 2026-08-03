@@ -1,0 +1,14 @@
+torch==2.11.0
+torchvision==0.26.0
+flwr==1.32.1
+numpy==2.1.3
+matplotlib
+scikit-learn
+
+# GPU builds (CUDA 12.8, RTX 50-series/Blackwell support):
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# Note: flwr.simulation.start_simulation (Ray-backed) is NOT used in this repo.
+# Ray currently ships no wheel for Python 3.13, so the FL loop is driven
+# sequentially in src/fl/experiment.py using Flower's own NumPyClient and
+# aggregate()/aggregate_krum() functions instead of Ray actors.
