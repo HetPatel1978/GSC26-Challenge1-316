@@ -2,10 +2,11 @@
 
 Runs a sequential (non-Ray) FL simulation loop that still uses Flower's real
 `NumPyClient` for local training and Flower's own `aggregate` / `aggregate_krum`
-implementations for server-side aggregation. `flwr.simulation.start_simulation`
-(Ray-backed) is not used because Ray currently ships no wheel for Python 3.13 on
-this machine; this driver reproduces the same client/round/aggregate/evaluate
-loop by hand instead of spinning up Ray actors. See README limitations.
+implementations (or the FLTrust implementation in src/defenses/aggregation.py)
+for server-side aggregation. `flwr.simulation.start_simulation` (Ray-backed)
+is not used because Ray currently ships no wheel for Python 3.13 on this
+machine; this driver reproduces the same client/round/aggregate/evaluate loop
+by hand instead of spinning up Ray actors. See README limitations.
 """
 import json
 import os
@@ -16,10 +17,11 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.fl.data import load_cifar10, dirichlet_partition, IndexedSubset
+from src.fl.data import load_cifar10, dirichlet_partition, reserve_root_set, IndexedSubset
 from src.fl.models import CNNCifar
 from src.fl.client import FlowerClient, get_parameters, set_parameters, test
-from src.attacks.badnets import BadNetsPoisonedDataset, TriggerAllDataset
+from src.attacks.badnets import BadNetsPoisonedDataset, TriggerAllDataset, square_trigger
+from src.attacks.dba import make_local_trigger_fn, make_combined_trigger_fn, DBA_NUM_PARTS
 
 
 @dataclass
@@ -34,10 +36,18 @@ class ExperimentConfig:
     batch_size: int = 32
     seed: int = 42
 
-    # Attack params (BadNets). Set fraction_malicious=0.0 for a clean run.
+    # Attack params. attack_type: "badnets" (single trigger, every malicious
+    # client poisons with the full pattern) or "dba" (trigger decomposed into
+    # DBA_NUM_PARTS pieces, each malicious client only ever poisons with its
+    # own piece; ASR is measured with the reassembled full trigger).
+    attack_type: str = "badnets"
     fraction_malicious: float = 0.2
     poison_rate: float = 0.5
     target_label: int = 0
+
+    # FLTrust only: size of the server's disjoint trusted root set, carved out
+    # of the training pool before client partitioning. 0 = unused.
+    root_size: int = 0
 
     data_root: str = "./data"
     results_dir: str = "./results/metrics"
@@ -54,6 +64,28 @@ def build_malicious_ids(cfg: ExperimentConfig) -> set:
     return set(int(m) for m in malicious)
 
 
+def _client_trigger_fn(cfg: ExperimentConfig, cid: int, malicious_ids: set):
+    """The trigger_fn a given malicious client poisons its local data with."""
+    if cfg.attack_type == "badnets":
+        return square_trigger
+    if cfg.attack_type == "dba":
+        rank = sorted(malicious_ids).index(cid)
+        part_idx = rank % DBA_NUM_PARTS
+        return make_local_trigger_fn(part_idx)
+    raise ValueError(f"unknown attack_type {cfg.attack_type}")
+
+
+def _eval_trigger_fn(cfg: ExperimentConfig):
+    """The trigger_fn used to build the ASR evaluation set -- always the FULL
+    trigger, since that's what a backdoor-triggering input actually looks like
+    at inference time regardless of how it was distributed during training."""
+    if cfg.attack_type == "badnets":
+        return square_trigger
+    if cfg.attack_type == "dba":
+        return make_combined_trigger_fn()
+    raise ValueError(f"unknown attack_type {cfg.attack_type}")
+
+
 def build_clients(
     cfg: ExperimentConfig,
     client_indices: List[np.ndarray],
@@ -68,7 +100,11 @@ def build_clients(
         is_malicious = cid in malicious_ids
         if is_malicious:
             local_ds = BadNetsPoisonedDataset(
-                local_ds, poison_rate=cfg.poison_rate, target_label=cfg.target_label, seed=cfg.seed + cid
+                local_ds,
+                poison_rate=cfg.poison_rate,
+                target_label=cfg.target_label,
+                seed=cfg.seed + cid,
+                trigger_fn=_client_trigger_fn(cfg, cid, malicious_ids),
             )
         trainloader = DataLoader(local_ds, batch_size=cfg.batch_size, shuffle=True)
         clients[cid] = FlowerClient(
@@ -86,7 +122,7 @@ def build_clients(
 
 def make_evaluate_fn(cfg: ExperimentConfig, history_out: List[Dict], device: torch.device):
     _, test_set = load_cifar10(cfg.data_root)
-    backdoor_test_set = TriggerAllDataset(test_set, target_label=cfg.target_label)
+    backdoor_test_set = TriggerAllDataset(test_set, target_label=cfg.target_label, trigger_fn=_eval_trigger_fn(cfg))
     clean_loader = DataLoader(test_set, batch_size=256, shuffle=False)
     backdoor_loader = DataLoader(backdoor_test_set, batch_size=256, shuffle=False)
     eval_model = CNNCifar()
@@ -114,7 +150,15 @@ def run_experiment(
     device = get_device()
 
     train_set, _ = load_cifar10(cfg.data_root)
-    client_indices = dirichlet_partition(train_set.targets, cfg.num_clients, cfg.dirichlet_alpha, seed=cfg.seed)
+
+    if cfg.root_size > 0:
+        _root_idx, remaining_idx = reserve_root_set(len(train_set), cfg.root_size, cfg.seed)
+        remaining_labels = np.array(train_set.targets)[remaining_idx]
+        sub_indices = dirichlet_partition(remaining_labels, cfg.num_clients, cfg.dirichlet_alpha, seed=cfg.seed)
+        client_indices = [remaining_idx[idxs] for idxs in sub_indices]
+    else:
+        client_indices = dirichlet_partition(train_set.targets, cfg.num_clients, cfg.dirichlet_alpha, seed=cfg.seed)
+
     malicious_ids = build_malicious_ids(cfg)
 
     shared_model = CNNCifar()
@@ -138,7 +182,7 @@ def run_experiment(
             results.append((params, num_examples))
             n_malicious_sampled += int(metrics["is_malicious"])
 
-        global_params = aggregate_fn(results, **aggregate_kwargs)
+        global_params = aggregate_fn(results, global_params=global_params, round_num=rnd, **aggregate_kwargs)
         evaluate_fn(rnd, global_params)
 
     out_path = os.path.join(cfg.results_dir, f"{cfg.name}.json")

@@ -79,6 +79,18 @@ class IndexedSubset(Dataset):
         return self.base_dataset[int(self.indices[i])]
 
 
+def reserve_root_set(n_total: int, root_size: int, seed: int):
+    """Split indices [0, n_total) into a small IID root set (e.g. for FLTrust's
+    server-side trusted dataset) and the remaining pool, which callers then
+    partition across clients -- keeping the root set strictly disjoint from
+    every client's data."""
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n_total)
+    root_idx = perm[:root_size]
+    remaining_idx = perm[root_size:]
+    return root_idx, remaining_idx
+
+
 def partition_class_distribution(labels, client_indices) -> np.ndarray:
     """Return a (num_clients, num_classes) count matrix, useful for sanity-checking
     and for plotting the non-IID skew."""
