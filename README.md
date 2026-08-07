@@ -1,8 +1,27 @@
 # Backdoor Attacks in Federated Learning — Remediation
 
 IEEE GSC 2026, Challenge 1. Federated learning on CIFAR-10 with non-IID
-clients, two backdoor attacks (BadNets, DBA), and two Byzantine-robust
-aggregation defenses (Krum, FLTrust) evaluated against them.
+clients, two backdoor attacks (BadNets, DBA) plus a defense-aware adaptive
+attacker stress test, and four Byzantine-robust aggregation defenses (Krum,
+Multi-Krum, FLTrust, FLAME) evaluated against them — 9 attack/defense
+combinations in total, all 30 rounds, with an honest accounting of where
+each defense actually holds and where it doesn't.
+
+## Quick demo
+
+```bash
+pip install -r requirements.txt
+python scripts/demo.py
+```
+
+Runs a scaled-down 5-round BadNets-vs-FLTrust simulation (10 clients, ~60s
+on GPU) and prints round-by-round accuracy/ASR straight to the terminal,
+plus saves `results/plots/demo.png`:
+
+![Quick demo: BadNets vs FLTrust, 5 rounds](results/plots/demo.png)
+
+For the full 30-round, 20-client results behind every number in this
+README, see [Results](#results) below and `scripts/run_*.py`.
 
 ## Problem statement
 
@@ -10,10 +29,10 @@ Federated learning lets clients train a shared model without sharing raw data,
 but a malicious client can poison its local updates to implant a **backdoor**:
 the global model behaves normally on clean inputs but misclassifies any input
 carrying a fixed trigger pattern into an attacker-chosen target class. This
-repo implements two attacks of increasing stealth, a training/eval pipeline
-that measures them (accuracy on the real task vs. Attack Success Rate on
-triggered inputs), and two Byzantine-robust aggregation defenses evaluated
-against both.
+repo implements two attacks of increasing stealth plus a defense-aware
+adaptive-attacker stress test, a training/eval pipeline that measures them
+(accuracy on the real task vs. Attack Success Rate on triggered inputs), and
+four Byzantine-robust aggregation defenses evaluated against them.
 
 ## Approach
 
@@ -106,7 +125,7 @@ against both.
 
 ## Results
 
-Setup (all 4 runs): 20 clients, Dirichlet α=0.5, 20% malicious (4 clients),
+Setup (all 9 runs): 20 clients, Dirichlet α=0.5, 20% malicious (4 clients),
 50% local poison rate, 30 rounds, 50% client participation per round.
 
 | Attack | Defense | Final accuracy | Final ASR |
@@ -267,16 +286,22 @@ downloads to `./data/` on first run.
 
 ```
 src/fl/          data partitioning, model, Flower client, simulation driver, plotting
-src/attacks/     BadNets and DBA trigger + poisoned-dataset logic
-src/defenses/    aggregation strategies (FedAvg, Krum, FLTrust)
-scripts/         one experiment per script (config + entry point)
-results/metrics/ per-round JSON metrics for each run
-results/plots/   generated comparison plots
+src/attacks/     BadNets, DBA, and the defense-aware adaptive attacker
+src/defenses/    aggregation strategies (FedAvg, Krum, Multi-Krum, FLTrust, FLAME)
+scripts/         one experiment per script (config + entry point), demo.py for the quick demo
+results/metrics/ per-round JSON metrics for each 30-round run
+results/demo_metrics/ per-round JSON metrics for the quick demo
+results/plots/   generated comparison plots + the demo plot
 ```
 
 ## Status
 
-Attack x defense matrix implemented and evaluated: BadNets x {FedAvg, Krum},
-DBA x {FedAvg, FLTrust}. FLAME defense was scoped as a stretch goal and was
-cut to keep the four combos above fully evaluated and documented ahead of the
-deadline.
+Attack x defense matrix implemented and evaluated, 30 rounds each: BadNets x
+{FedAvg, Krum, Multi-Krum, FLAME, FLTrust (naive + adaptive attacker)}, DBA x
+{FedAvg, FLTrust, FLAME} — 9 combinations, all in the Results table above.
+The novel-contribution angle (a combined defense stacking FLTrust-style
+reference filtering with FLAME-style clustering/clipping/noise) is motivated
+directly by this data — FLTrust and FLAME fail in complementary ways here
+(reference-based vs. peer-consensus checks under non-IID skew) — but is not
+yet implemented; see the FLAME and adaptive-attacker writeups above for the
+specific mechanism gap it would need to close.
