@@ -37,11 +37,25 @@ against both.
   trigger. This makes DBA materially harder to catch with per-client anomaly
   detection, since any one malicious update looks like a much smaller, subtler
   perturbation than a full BadNets update.
-- **ASR measurement**: for both attacks, Attack Success Rate is measured
-  identically — trigger every non-target-class test image with the *full*
-  trigger pattern (the reassembled 4x4 pattern for DBA) and check what
-  fraction the global model classifies as the target class. This keeps the
-  two attacks' footprints directly comparable.
+- **Attack — Adaptive attacker vs. FLTrust** (`src/attacks/adaptive.py`): a
+  defense-aware stress test, not a third independent attack -- it takes
+  BadNets' poisoning and adds update-shaping on top, specifically targeting
+  FLTrust's cosine-similarity trust check. Each malicious client trains a
+  second, *reference* model on only its own unpoisoned local data (the same
+  epochs/lr the server uses on its root set for FLTrust's own g0) to
+  approximate "what an honest gradient from this client would look like."
+  It then decomposes its real (poisoned) update into components parallel and
+  orthogonal to that reference direction and rescales the parallel part so
+  the submitted update's cosine similarity to the reference direction hits a
+  target (0.9 here) -- the minimal distortion needed to look trustworthy,
+  keeping the orthogonal component (which carries the actual backdoor
+  signal) intact. See `constrain_to_cosine_similarity`'s closed-form
+  derivation in that file.
+- **ASR measurement**: Attack Success Rate is measured identically across all
+  three — trigger every non-target-class test image with the *full* trigger
+  pattern (the reassembled 4x4 pattern for DBA) and check what fraction the
+  global model classifies as the target class. This keeps every combo's
+  footprint directly comparable.
 
 - **Defenses** (`src/defenses/aggregation.py`):
   - **FedAvg** — thin wrapper around Flower's own `aggregate` (plain
@@ -94,6 +108,8 @@ Setup (all 4 runs): 20 clients, Dirichlet α=0.5, 20% malicious (4 clients),
 | BadNets | FedAvg (none) | 0.657 | 0.961 |
 | BadNets | Krum | 0.316 | 0.000 |
 | BadNets | FLAME | 0.669 | 0.954 |
+| BadNets | FLTrust | 0.594 | 0.807 |
+| BadNets | FLTrust, adaptive attacker | 0.583 | 0.624 |
 | DBA | FedAvg (none) | 0.655 | 0.741 |
 | DBA | FLTrust | 0.591 | 0.328 |
 | DBA | FLAME | 0.677 | 0.591 |
@@ -163,7 +179,38 @@ filtering plus FLAME-style clipping/noise as a second layer) rather than
 picking one mechanism, and it's the more interesting result to report
 honestly than a FLAME row that "just works" would have been.
 
-Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba}.json`.
+**Adaptive attacker vs. FLTrust -- FLTrust breaks, but not for the reason a
+stress test is usually built to show.** The honest result here needed a
+control run that wasn't in the table before: BadNets (no evasion at all)
+against FLTrust. That non-adaptive control already reaches 0.807 final ASR
+-- decisively higher than the 0.328 the DBA-vs-FLTrust row above reported,
+and higher than the defense-aware adaptive attacker's own 0.624. The reason
+is BadNets' 50% local poison rate: half of every malicious client's local
+data is still clean, so even its *unmodified* malicious delta retains enough
+alignment with the honest gradient direction to pass FLTrust's
+ReLU-clipped cosine check with substantial trust weight from early rounds --
+no adaptation required. **FLTrust's real weak point exposed here is
+structural** (its cosine-similarity check is too permissive against any
+update that still carries a lot of legitimate-task gradient, which any
+partial-poisoning attack does), not attacker sophistication.
+
+That also explains why the dedicated adaptive attacker's 0.624 ASR is
+*lower* than the naive control's 0.807, not higher, in this run --
+`constrain_to_cosine_similarity`'s target (cosine similarity 0.9 against
+the client's own clean-data reference) is more caution than the naive
+attack actually needed to pass FLTrust's filter at all, so the projection
+step throws away some real attack payload for stealth margin it didn't
+need to buy. A better-calibrated adaptive attacker (targeting the defense's
+*actual* effective threshold rather than a fixed high value) would likely
+close most of that gap; that calibration search was out of scope for the
+4-day build window. The 30-round ASR curves for both runs are noisy and the
+adaptive run's last two rounds (0.635, 0.624) are trending back up, so this
+should be read as "meaningfully lower across rounds 22-30, not just a
+single-round artifact" rather than a settled asymptote -- see
+`results/metrics/{badnets_fltrust,adaptive_badnets_fltrust}.json` for the
+full per-round curves.
+
+Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba,badnets_fltrust,adaptive_badnets_fltrust}.json`.
 
 ## How to run
 
@@ -181,6 +228,10 @@ python scripts/run_dba_fltrust.py       # FLTrust defense
 # FLAME defense (no root set needed)
 python scripts/run_flame_badnets.py
 python scripts/run_flame_dba.py
+
+# FLTrust vs. BadNets: naive control, then the defense-aware adaptive attacker
+python scripts/run_badnets_fltrust.py
+python scripts/run_adaptive_vs_fltrust.py
 
 # Regenerate both comparison plots from results/metrics/*.json
 python -m src.fl.plotting
