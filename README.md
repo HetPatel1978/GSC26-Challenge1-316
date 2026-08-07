@@ -62,6 +62,19 @@ against both.
     "boost your update's magnitude to dominate the average" scaling attack —
     then combined as a trust-weighted average of *all* clients, rather than
     Krum's keep-exactly-one-update approach.
+  - **FLAME** (Nguyen et al., 2022) — implemented directly (no trusted root
+    set needed, unlike FLTrust). Three stages each round: (1) **dynamic
+    clustering** — HDBSCAN over pairwise cosine *distance* between client
+    update directions, with `min_cluster_size` fixed at `n//2 + 1` so a
+    cluster can only form from a majority of the round's clients; the
+    largest resulting cluster is kept and everything else (including
+    unclustered "noise" points) is dropped as Byzantine; (2) **adaptive
+    clipping** — each kept update's norm is clipped down to the *median*
+    norm among kept updates; (3) **adaptive noise** — Gaussian noise scaled
+    to that same median norm is added to the aggregated model, a
+    differential-privacy-style step meant to scrub any backdoor signal that
+    survived clustering. See Results below — clustering does not fire the
+    way the paper describes under this repo's non-IID setting.
 - **Simulation driver** (`src/fl/experiment.py`): a sequential round loop that
   drives real `flwr.client.NumPyClient` instances and feeds their results
   into the aggregation functions above. **Note**: `flwr.simulation.start_simulation`
@@ -80,8 +93,10 @@ Setup (all 4 runs): 20 clients, Dirichlet α=0.5, 20% malicious (4 clients),
 |---|---|---|---|
 | BadNets | FedAvg (none) | 0.657 | 0.961 |
 | BadNets | Krum | 0.316 | 0.000 |
+| BadNets | FLAME | 0.669 | 0.954 |
 | DBA | FedAvg (none) | 0.655 | 0.741 |
 | DBA | FLTrust | 0.591 | 0.328 |
+| DBA | FLAME | 0.677 | 0.591 |
 
 ![Accuracy and ASR vs. rounds](results/plots/accuracy_asr_comparison.png)
 ![Final-round comparison](results/plots/final_round_comparison.png)
@@ -116,7 +131,39 @@ gives both full suppression *and* full accuracy retention — a real
 motivation for combining defense signals rather than relying on any one
 mechanism.
 
-Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,dba_fedavg,dba_fltrust}.json`.
+**FLAME essentially doesn't fire here, against either attack** (ASR 0.954
+vs. undefended 0.961 on BadNets; 0.591 vs. undefended 0.741 on DBA — only
+the clipping+noise stages contribute, and only mildly). This was surprising
+enough to verify directly: instrumenting `flame_aggregate` mid-run shows
+HDBSCAN returns *all points labeled noise* (`-1`), every single round, for
+both attacks — the clustering step never finds the `n//2 + 1`-sized majority
+cluster it needs, so the aggregator falls back to keeping every client's
+update (see `flame_aggregate`'s fail-open branch in
+`src/defenses/aggregation.py`), and the defense degrades to a lightly
+clipped, lightly noised FedAvg. The root cause is dimensionality, not a bug:
+this CNN has ~320K parameters, and pairwise cosine distance between *any*
+two client updates in this repo's Dirichlet(α=0.5) setting -- honest/honest,
+honest/malicious, doesn't matter -- sits around 0.85-1.05 (near-orthogonal),
+confirmed by printing the raw distance matrices for several mid-training
+rounds. Two honest clients trained on very different label distributions for
+2 local epochs each simply don't produce similar-enough update vectors for
+density clustering to isolate a "majority" in raw parameter space. This is
+the same underlying pathology as Krum's accuracy collapse above (non-IID
+heterogeneity looks statistically like Byzantine behavior to any method that
+only looks at update geometry) -- it just breaks FLAME's mutual-clustering
+approach in the opposite direction: instead of throwing away honest updates
+as false positives, it fails to flag malicious ones at all. FLTrust sidesteps
+this specific failure mode because it never needs *mutual* client-to-client
+agreement -- it only needs each client to align with one privileged,
+server-controlled reference direction (g0, trained on the root set), which
+non-IID skew across *clients* can't corrupt. That asymmetry -- a reference-
+based check surviving where a peer-consensus check fails -- is a genuine
+argument for combining defense signals (e.g. FLTrust-style reference
+filtering plus FLAME-style clipping/noise as a second layer) rather than
+picking one mechanism, and it's the more interesting result to report
+honestly than a FLAME row that "just works" would have been.
+
+Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba}.json`.
 
 ## How to run
 
@@ -130,6 +177,10 @@ python scripts/run_krum_defense.py      # Krum defense
 # DBA attack
 python scripts/run_dba_fedavg.py        # no defense
 python scripts/run_dba_fltrust.py       # FLTrust defense
+
+# FLAME defense (no root set needed)
+python scripts/run_flame_badnets.py
+python scripts/run_flame_dba.py
 
 # Regenerate both comparison plots from results/metrics/*.json
 python -m src.fl.plotting

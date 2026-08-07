@@ -144,7 +144,14 @@ def run_experiment(
     cfg: ExperimentConfig,
     aggregate_fn: Callable,
     aggregate_kwargs: Optional[Dict] = None,
+    adapt_fn_factory: Optional[Callable] = None,
 ):
+    """adapt_fn_factory, if given, is called once with (train_set, client_indices,
+    malicious_ids) after partitioning, and must return an
+    adapt_fn(cid, params, global_params) -> params hook applied to every
+    malicious client's freshly-trained update before it's handed to
+    aggregate_fn -- e.g. src.attacks.adaptive's defense-aware attacker, which
+    reshapes the update to pass FLTrust's cosine-similarity trust check."""
     aggregate_kwargs = aggregate_kwargs or {}
     os.makedirs(cfg.results_dir, exist_ok=True)
     device = get_device()
@@ -163,6 +170,7 @@ def run_experiment(
 
     shared_model = CNNCifar()
     clients = build_clients(cfg, client_indices, malicious_ids, shared_model, device)
+    adapt_fn = adapt_fn_factory(train_set, client_indices, malicious_ids) if adapt_fn_factory else None
 
     round_history: List[Dict] = []
     evaluate_fn = make_evaluate_fn(cfg, round_history, device)
@@ -179,6 +187,8 @@ def run_experiment(
         n_malicious_sampled = 0
         for cid in sampled_ids:
             params, num_examples, metrics = clients[int(cid)].fit(global_params, {})
+            if adapt_fn is not None and metrics["is_malicious"]:
+                params = adapt_fn(cid=int(cid), params=params, global_params=global_params)
             results.append((params, num_examples))
             n_malicious_sampled += int(metrics["is_malicious"])
 
