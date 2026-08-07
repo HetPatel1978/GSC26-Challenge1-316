@@ -64,6 +64,12 @@ against both.
     client update by summed distance to its n-f-2 closest neighbors and keeps
     only the single most "central" update each round (single-Krum,
     `to_keep=0`), discarding the rest entirely.
+  - **Multi-Krum** — same distance-based scoring as Krum, but *averages* the
+    `to_keep` most central updates instead of keeping exactly one
+    (`to_keep = num_fit - num_malicious`, i.e. everyone not assumed
+    Byzantine). Meant to fix single-Krum's accuracy collapse by not
+    discarding most of the honest signal every round. See Results — it
+    fixes accuracy but at a cost.
   - **FLTrust** (Cao et al., 2021) — implemented directly (Flower doesn't
     ship one). The server holds a small trusted root dataset (500 samples,
     reserved via `reserve_root_set` in `src/fl/data.py` so it's strictly
@@ -107,6 +113,7 @@ Setup (all 4 runs): 20 clients, Dirichlet α=0.5, 20% malicious (4 clients),
 |---|---|---|---|
 | BadNets | FedAvg (none) | 0.657 | 0.961 |
 | BadNets | Krum | 0.316 | 0.000 |
+| BadNets | Multi-Krum | 0.660 | 0.981 |
 | BadNets | FLAME | 0.669 | 0.954 |
 | BadNets | FLTrust | 0.594 | 0.807 |
 | BadNets | FLTrust, adaptive attacker | 0.583 | 0.624 |
@@ -131,6 +138,21 @@ good, unusual-but-honest updates along with the bad ones — accuracy plateaus
 at 0.32, roughly half of FedAvg's. A known weakness of Krum: it trades away
 most of federated learning's statistical efficiency to get robustness,
 and that trade gets worse the more heterogeneous the clients are.
+
+**Multi-Krum vs. BadNets**: fixes exactly the accuracy problem above — 0.660
+final accuracy, essentially matching undefended FedAvg (0.657) and more than
+double single-Krum's 0.316 — by averaging the 8 most central updates each
+round (`to_keep = num_fit - num_malicious`) instead of keeping just one. But
+ASR climbs to 0.981, *higher* than undefended FedAvg's own 0.961: keeping 8
+of 10 client updates per round only excludes the 2 most distance-outlying
+ones, and under this repo's Dirichlet(α=0.5) skew "most distance-outlying"
+tracks natural client heterogeneity at least as much as it tracks actual
+malicious behavior (the same effect documented for FLAME below), so the
+excluded pair usually isn't the pair that matters. Between the two Krum
+variants there's a hard knob, not a free lunch: `to_keep` trades accuracy
+against robustness directly, and no single setting tested here buys both —
+`to_keep=0` (single-Krum) sacrifices accuracy for full suppression,
+`to_keep=n-f` (Multi-Krum) sacrifices suppression for full accuracy.
 
 **FLTrust vs. DBA**: a much better accuracy/robustness trade — 0.591 accuracy
 (only 6.6pp below the undefended run) with ASR cut from 0.741 to 0.328, a
@@ -210,7 +232,7 @@ single-round artifact" rather than a settled asymptote -- see
 `results/metrics/{badnets_fltrust,adaptive_badnets_fltrust}.json` for the
 full per-round curves.
 
-Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba,badnets_fltrust,adaptive_badnets_fltrust}.json`.
+Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,multikrum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba,badnets_fltrust,adaptive_badnets_fltrust}.json`.
 
 ## How to run
 
@@ -220,6 +242,7 @@ pip install -r requirements.txt
 # BadNets attack
 python scripts/run_fedavg_baseline.py   # no defense
 python scripts/run_krum_defense.py      # Krum defense
+python scripts/run_multikrum_defense.py # Multi-Krum defense
 
 # DBA attack
 python scripts/run_dba_fedavg.py        # no defense
