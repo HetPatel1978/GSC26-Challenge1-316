@@ -1,0 +1,116 @@
+{
+  "config": {
+    "name": "demo_badnets_fedavg",
+    "num_clients": 10,
+    "dirichlet_alpha": 0.5,
+    "fraction_fit": 0.5,
+    "num_rounds": 15,
+    "local_epochs": 1,
+    "lr": 0.01,
+    "batch_size": 32,
+    "seed": 42,
+    "attack_type": "badnets",
+    "fraction_malicious": 0.2,
+    "poison_rate": 0.5,
+    "target_label": 0,
+    "root_size": 0,
+    "data_root": "./data",
+    "results_dir": "./results/demo_metrics"
+  },
+  "malicious_ids": [
+    0,
+    7
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "accuracy": 0.1204,
+      "loss": 2.2289398696899414,
+      "asr": 0.0
+    },
+    {
+      "round": 2,
+      "accuracy": 0.2797,
+      "loss": 1.906915418624878,
+      "asr": 0.0005555555555555556
+    },
+    {
+      "round": 3,
+      "accuracy": 0.2799,
+      "loss": 1.9424466106414795,
+      "asr": 0.0067777777777777775
+    },
+    {
+      "round": 4,
+      "accuracy": 0.3775,
+      "loss": 1.6424815425872803,
+      "asr": 0.04055555555555555
+    },
+    {
+      "round": 5,
+      "accuracy": 0.3444,
+      "loss": 1.7766625829696656,
+      "asr": 0.0013333333333333333
+    },
+    {
+      "round": 6,
+      "accuracy": 0.4245,
+      "loss": 1.583923087310791,
+      "asr": 0.7871111111111111
+    },
+    {
+      "round": 7,
+      "accuracy": 0.4047,
+      "loss": 1.5593274684906007,
+      "asr": 0.24188888888888888
+    },
+    {
+      "round": 8,
+      "accuracy": 0.4549,
+      "loss": 1.4832422229766846,
+      "asr": 0.25666666666666665
+    },
+    {
+      "round": 9,
+      "accuracy": 0.4453,
+      "loss": 1.4627282604217529,
+      "asr": 0.221
+    },
+    {
+      "round": 10,
+      "accuracy": 0.4929,
+      "loss": 1.3680739044189454,
+      "asr": 0.22466666666666665
+    },
+    {
+      "round": 11,
+      "accuracy": 0.5072,
+      "loss": 1.3397737770080567,
+      "asr": 0.7726666666666666
+    },
+    {
+      "round": 12,
+      "accuracy": 0.5356,
+      "loss": 1.3165905443191528,
+      "asr": 0.9463333333333334
+    },
+    {
+      "round": 13,
+      "accuracy": 0.5327,
+      "loss": 1.2687379749298096,
+      "asr": 0.9404444444444444
+    },
+    {
+      "round": 14,
+      "accuracy": 0.5438,
+      "loss": 1.2412675178527832,
+      "asr": 0.972
+    },
+    {
+      "round": 15,
+      "accuracy": 0.5738,
+      "loss": 1.1694760559082031,
+      "asr": 0.8232222222222222
+    }
+  ]
+}
