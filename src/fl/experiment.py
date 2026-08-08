@@ -156,6 +156,12 @@ def run_experiment(
     os.makedirs(cfg.results_dir, exist_ok=True)
     device = get_device()
 
+    # Ties cfg.seed to model init, dropout, and DataLoader shuffling order
+    # (all draw from torch's global RNG otherwise) -- without this, cfg.seed
+    # only controlled data partitioning/attacker selection/client sampling,
+    # so multi-seed runs weren't actually varying everything they claimed to.
+    torch.manual_seed(cfg.seed)
+
     train_set, _ = load_cifar10(cfg.data_root)
 
     if cfg.root_size > 0:
