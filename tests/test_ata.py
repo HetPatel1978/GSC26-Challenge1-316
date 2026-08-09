@@ -123,15 +123,19 @@ def test_ata_reduces_asr_vs_fedavg_smoke():
 
     Uses the same num_clients/seed/root_size as scripts/run_ata_badnets.py
     and scripts/run_multiseed.py (just truncated to 3 rounds) rather than a
-    smaller ad hoc config: round-by-round dynamics up to round N don't
-    depend on how many total rounds a run is configured for, so this
-    reproduces exactly the round-3 gap already observed in those full
-    30-round runs (ata_badnets.json: round 3 asr=0.011; the seed-42 arm of
-    the FedAvg multi-seed check: round 3 asr=0.309) instead of gambling on
-    an unvalidated small-scale config, where 3 rounds / 10 clients turned
-    out to be too noisy to reliably separate the two (an earlier version of
-    this test using num_clients=10 failed intermittently for exactly that
-    reason)."""
+    smaller ad hoc config: this is the scale/seed combination already shown,
+    across every run at this scale, to separate the two by round 3 with a
+    wide margin (e.g. ata_badnets.json: round 3 asr=0.011 vs the seed-42 arm
+    of the FedAvg multi-seed check: round 3 asr=0.309). Note this is *not*
+    bit-for-bit reproduction of those exact numbers -- this repo's training
+    is not pinned to deterministic cuDNN kernels, so even identical
+    seed+config runs diverge by round 2 in floating point (confirmed
+    directly: see the README's note on GPU non-determinism). What carries
+    over is the reliable *separation*, not the exact values. An earlier
+    version of this test using num_clients=10/seed=123/3 rounds failed
+    intermittently because at that smaller scale the separation itself
+    isn't reliable, which is a different and worse problem than
+    non-determinism in the exact numbers."""
     from src.fl.data import IndexedSubset, load_cifar10, reserve_root_set
     from src.fl.experiment import ExperimentConfig, get_device, run_experiment
     from src.fl.models import CNNCifar

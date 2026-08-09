@@ -210,7 +210,10 @@ five Byzantine-robust aggregation defenses evaluated against them.
   is set at the top of every run so `cfg.seed` controls model init and
   DataLoader shuffling order too, not just data partitioning and
   attacker/client selection — needed for the multi-seed results below to
-  actually vary everything they claim to.
+  actually vary everything they claim to. This does *not* make same-seed
+  runs bit-for-bit reproducible on GPU, since cuDNN kernels aren't pinned to
+  deterministic mode here — see the caveat in the multi-seed section below,
+  found by re-running a seed and getting a different number.
 
 ## Results
 
@@ -338,31 +341,58 @@ in this repo that isn't).
 
 Raw per-round metrics: `results/metrics/{fedavg_baseline,krum_defense,multikrum_defense,dba_fedavg,dba_fltrust,flame_badnets,flame_dba,badnets_fltrust,adaptive_badnets_fltrust,ata_badnets,ata_dba,adaptive_badnets_ata}.json`.
 
-### Multi-seed check: BadNets vs. FedAvg and vs. ATA
+### Multi-seed checks: every headline ATA result, 3 seeds each
 
 Every other number in this README is a single-seed point estimate, and the
 ASR curves in the plots above are visibly noisy round-to-round — a
 legitimate concern for how much to trust any single final-round comparison.
-This is the one comparison that gets an actual error bar instead: BadNets
-vs. FedAvg and vs. ATA, 3 seeds each (42, 43, 44), 30 rounds, with
-`torch.manual_seed(cfg.seed)` now set at the top of `run_experiment` so each
-seed varies model initialization and DataLoader shuffling too, not just
-data partitioning and attacker/client selection.
+All three of ATA's headline results get an actual error bar instead of a
+single-seed point estimate: BadNets vs. FedAvg/ATA, DBA vs. ATA, and the
+defense-aware adaptive attacker vs. ATA, 3 seeds each (42, 43, 44), 30
+rounds, with `torch.manual_seed(cfg.seed)` set at the top of
+`run_experiment` so each seed varies model initialization and DataLoader
+shuffling too, not just data partitioning and attacker/client selection.
 
-| Defense | Final accuracy (mean ± std) | Final ASR (mean ± std) |
-|---|---|---|
-| FedAvg (none) | 0.687 ± 0.034 | 0.945 ± 0.034 |
-| **ATA (ours)** | **0.562 ± 0.018** | **0.030 ± 0.018** |
+| Attack | Defense | Final accuracy (mean ± std) | Final ASR (mean ± std) |
+|---|---|---|---|
+| BadNets | FedAvg (none) | 0.687 ± 0.034 | 0.945 ± 0.034 |
+| BadNets | **ATA (ours)** | **0.562 ± 0.018** | **0.030 ± 0.018** |
+| DBA | **ATA (ours)** | **0.577 ± 0.030** | **0.026 ± 0.005** |
+| BadNets | **ATA (ours), adaptive attacker** | **0.566 ± 0.014** | **0.049 ± 0.031** |
 
-The gap (91.5pp on ASR) is an order of magnitude larger than either
-defense's own seed-to-seed variance, so this isn't single-seed noise: ATA's
-suppression of BadNets is a real, repeatable effect across independent
-random initializations, data partitions, and attacker/client samplings —
-not a single lucky run. The accuracy cost is real too (12.5pp below
-FedAvg's mean, consistent with every other suppression-focused defense
-tested in this repo) and also has low variance, so it's a stable trade-off,
-not a coin flip. Raw per-seed metrics and the summary:
-`results/multiseed_metrics/{fedavg_badnets_seed{42,43,44},ata_badnets_seed{42,43,44},summary}.json`.
+The BadNets-vs-FedAvg/ATA gap (91.5pp on ASR) is an order of magnitude
+larger than either defense's own seed-to-seed variance, so it isn't
+single-seed noise: ATA's suppression is a real, repeatable effect across
+independent random initializations, data partitions, and attacker/client
+samplings — not a single lucky run. The accuracy cost is real too (12.5pp
+below FedAvg's mean, consistent with every other suppression-focused
+defense tested in this repo) and also has low variance, so it's a stable
+trade-off, not a coin flip.
+
+**A methodological caveat worth surfacing, found while writing this
+section**: comparing these 3-seed runs against the single-seed headline
+numbers in the main results table above (which used seed=42 for every ATA
+combo) turned up something worth being honest about. Re-running the exact
+same seed and config for DBA-vs-ATA gave a *different* result the second
+time — 0.082 ASR in the main table's single run vs. 0.032 in this section's
+seed-42 arm, a gap much larger than the 3-seed spread (0.023-0.032) would
+suggest it should be. Diffing the two runs' raw JSON confirmed round 1 is
+bit-identical (same malicious client IDs, same accuracy, same ASR) but
+round 2 already diverges (0.145 vs 0.177 accuracy) — this is GPU
+non-determinism, not a seed or config bug: this repo's training isn't
+pinned to deterministic cuDNN kernels, so floating-point differences in
+convolution ops compound round over round even with an identical seed. The
+BadNets (0.054 vs. 0.049) and adaptive-attacker (0.038 vs. seed-42 arm's
+0.017, within the 3-seed range of 0.017-0.079) rows show the same effect
+much more mildly. This doesn't change any conclusion in this README — every
+realization of every ATA combo, across both the single-seed and 3-seed
+runs, stays in the same low single-to-low-double-digit percent ASR range,
+decisively separated from every non-ATA defense's 33-98% — but it does mean
+a single seed value (including the ones in the main results table above)
+carries more run-to-run noise than "seed" alone implies, which is exactly
+the kind of thing multi-seed treatment is supposed to catch. Raw per-seed
+metrics and summaries:
+`results/multiseed_metrics/{fedavg_badnets_seed{42,43,44},ata_badnets_seed{42,43,44},ata_dba_seed{42,43,44},adaptive_ata_seed{42,43,44},summary,summary_dba_adaptive}.json`.
 
 ## How to run
 
@@ -429,11 +459,15 @@ results/plots/   generated comparison plots + the demo plot
 Attack x defense matrix implemented and evaluated, 30 rounds each: BadNets x
 {FedAvg, Krum, Multi-Krum, FLAME, FLTrust (naive + adaptive attacker), ATA
 (naive + adaptive attacker)}, DBA x {FedAvg, FLTrust, FLAME, ATA} — 12
-combinations, all in the Results table above, plus a 3-seed mean±std check
-on the BadNets-vs-FedAvg/ATA comparison. **ATA (`src/defenses/ata.py`) is
-this repo's novel contribution** — the combined defense the original build
-plan scoped as the differentiator from a reproduction-only submission,
-motivated directly by this repo's own measured failure modes in FLTrust and
-FLAME rather than assembled from the papers in the abstract. It holds where
+combinations, all in the Results table above. Every headline ATA result
+(BadNets, DBA, and the adaptive attacker) additionally has a 3-seed
+mean±std check, not just BadNets. **ATA (`src/defenses/ata.py`) is this
+repo's novel contribution** — the combined defense the original build plan
+scoped as the differentiator from a reproduction-only submission, motivated
+directly by this repo's own measured failure modes in FLTrust and FLAME
+rather than assembled from the papers in the abstract. It holds where
 FLTrust alone broke, against both the naive and defense-aware adaptive
-attacker.
+attacker, across every seed tested.
+
+`tests/test_ata.py` covers ATA's three stages with 5 tests (4 fast unit
+tests + 1 integration smoke test); MIT-licensed (`LICENSE`).
