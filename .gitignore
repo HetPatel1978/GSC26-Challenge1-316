@@ -8,3 +8,5 @@ data/
 venv/
 .ray/
 ray_results/
+.pytest_cache/
+results/test_smoke_metrics/

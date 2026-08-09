@@ -391,11 +391,16 @@ python scripts/run_ata_badnets.py
 python scripts/run_ata_dba.py
 python scripts/run_adaptive_vs_ata.py   # the key stress test
 
-# Multi-seed check (3 seeds, BadNets vs FedAvg and vs ATA)
-python scripts/run_multiseed.py
+# Multi-seed checks (3 seeds each) for every headline ATA result
+python scripts/run_multiseed.py               # BadNets vs FedAvg and vs ATA
+python scripts/run_multiseed_dba_adaptive.py   # DBA vs ATA, and the adaptive attacker vs ATA
 
 # Regenerate all comparison plots from results/metrics/*.json
 python -m src.fl.plotting
+
+# Run the test suite (5 tests: 4 fast unit tests on ATA's individual stages,
+# 1 integration smoke test that needs CIFAR-10 and ~1-2 min)
+python -m pytest tests/ -v
 ```
 
 GPU is used automatically if available (`torch.cuda.is_available()`); CIFAR-10
@@ -409,9 +414,12 @@ src/attacks/     BadNets, DBA, and the defense-aware adaptive attacker
 src/defenses/    aggregation strategies: aggregation.py (FedAvg, Krum, Multi-Krum,
                  FLTrust, FLAME), ata.py (ATA -- this repo's own combined defense)
 scripts/         one experiment per script (config + entry point), demo.py for the
-                 quick demo, run_multiseed.py for the multi-seed check
+                 quick demo, run_multiseed*.py for the multi-seed checks
+tests/           test_ata.py -- 4 fast unit tests on ATA's individual stages
+                 (trust scoring, clipping, sign correction) + 1 integration
+                 smoke test (ASR drop vs FedAvg, needs CIFAR-10)
 results/metrics/ per-round JSON metrics for each 30-round run
-results/multiseed_metrics/ per-round JSON + summary.json for the multi-seed check
+results/multiseed_metrics/ per-round JSON + summary*.json for the multi-seed checks
 results/demo_metrics/ per-round JSON metrics for the quick demo
 results/plots/   generated comparison plots + the demo plot
 ```
